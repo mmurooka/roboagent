@@ -33,13 +33,24 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 class DETRVAE(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbones, transformer, encoder, state_dim, num_queries, camera_names,is_multi_task,
+
+    STATE_DIM = 7
+    ACTION_DIM = 7
+
+    @classmethod
+    def set_state_dim(cls, state_dim):
+        cls.STATE_DIM = state_dim
+
+    @classmethod
+    def set_action_dim(cls, action_dim):
+        cls.ACTION_DIM = action_dim
+
+    def __init__(self, backbones, transformer, encoder, num_queries, camera_names, is_multi_task,
                  use_film: bool = False):
         """ Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
-            state_dim: robot state dimension of the environment
             num_queries: number of object queries, ie detection slot. This is the maximal number of objects
                          DETR can detect in a single image. For COCO, we recommend 100 queries.
             aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
@@ -51,7 +62,7 @@ class DETRVAE(nn.Module):
         self.transformer = transformer
         self.encoder = encoder
         hidden_dim = transformer.d_model
-        self.action_head = nn.Linear(hidden_dim, state_dim)
+        self.action_head = nn.Linear(hidden_dim, self.ACTION_DIM)
         self.is_pad_head = nn.Linear(hidden_dim, 1)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
@@ -61,10 +72,10 @@ class DETRVAE(nn.Module):
         if backbones is not None:
             self.input_proj = nn.Conv2d(backbones[0].num_channels, hidden_dim, kernel_size=1)
             self.backbones = nn.ModuleList(backbones)
-            self.input_proj_robot_state = nn.Linear(7, hidden_dim) 
+            self.input_proj_robot_state = nn.Linear(self.STATE_DIM, hidden_dim)
         else:
             # input_dim = 14 + 7 # robot_state + env_state
-            self.input_proj_robot_state = nn.Linear(7, hidden_dim) ## 7 for qpos
+            self.input_proj_robot_state = nn.Linear(self.STATE_DIM, hidden_dim)
             self.input_proj_env_state = nn.Linear(7, hidden_dim)
             self.pos = torch.nn.Embedding(2, hidden_dim)
             self.backbones = None
@@ -72,7 +83,7 @@ class DETRVAE(nn.Module):
         # encoder extra parameters
         self.latent_dim = 32 # final size of latent z # TODO tune
         self.cls_embed = nn.Embedding(1, hidden_dim) # extra cls token embedding
-        self.encoder_proj = nn.Linear(8, hidden_dim) # project state to embedding
+        self.encoder_proj = nn.Linear(self.ACTION_DIM, hidden_dim) # project state to embedding
         self.latent_proj = nn.Linear(hidden_dim, self.latent_dim*2) # project hidden state to latent std, var
         self.register_buffer('pos_table', get_sinusoid_encoding_table(num_queries+1, hidden_dim))
 
@@ -259,8 +270,6 @@ def build_encoder(args):
 
 
 def build(args):
-    state_dim =  8#14 # TODO hardcode
-
     # From state
     # backbone = None # from state for now, no need for conv nets
     # From image
@@ -280,7 +289,6 @@ def build(args):
         backbones,
         transformer,
         encoder,
-        state_dim=state_dim,
         num_queries=args.num_queries,
         camera_names=args.camera_names,
         is_multi_task=args.multi_task,
